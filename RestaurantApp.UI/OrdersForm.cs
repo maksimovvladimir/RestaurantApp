@@ -27,15 +27,24 @@ public partial class OrdersForm : Form
     private void LoadOrders()
     {
         cmbOrders.Items.Clear();
-        foreach (var status in new[] { "draft", "placed", "cooking", "ready" })
+        foreach (var status in new[] { "draft", "placed", "cooking", "ready", "served" })
         {
             foreach (var (order, tableNumber, clientName) in _ordersRepo.GetOrdersByStatusWithTable(status))
             {
                 cmbOrders.Items.Add(new ComboBoxOrderItem(order, tableNumber, clientName));
             }
         }
-        if (cmbOrders.Items.Count > 0) cmbOrders.SelectedIndex = 0;
-        else RefreshOrderItems();
+        if (cmbOrders.Items.Count > 0)
+        {
+            cmbOrders.SelectedIndex = 0;
+            _currentOrderId = ((ComboBoxOrderItem)cmbOrders.Items[0]).Order.Id;
+            RefreshOrderItems();
+        }
+        else
+        {
+            _currentOrderId = null;
+            RefreshOrderItems();
+        }
     }
 
     private void LoadMenu()
@@ -71,12 +80,18 @@ public partial class OrdersForm : Form
             lblStatus.Text = $"Статус: {StatusToRussian(selected.Order.Status)}";
         }
 
-        var hasReceipt = _ordersRepo.HasReceipt(_currentOrderId.Value);
-        btnPay.Enabled = selected?.Order.Status == "served" && !hasReceipt;
+        var currentStatus = selected?.Order.Status;
+        btnPlaceOrder.Enabled = currentStatus == "draft";
+        btnStartCooking.Enabled = currentStatus == "placed";
+        btnMarkReady.Enabled = currentStatus == "cooking";
+        btnMarkServed.Enabled = currentStatus == "ready";
+
+        var hasReceipt = _currentOrderId is null ? false : _ordersRepo.HasReceipt(_currentOrderId.Value);
+        btnPay.Enabled = currentStatus == "served" && !hasReceipt;
 
         if (hasReceipt)
         {
-            var receipt = _ordersRepo.GetReceipt(_currentOrderId.Value);
+            var receipt = _ordersRepo.GetReceipt(_currentOrderId!.Value);
             if (receipt is not null)
             {
                 lblTotal.Text += $"   (оплачено: {receipt.Amount:0.00} ₽, {PaymentToRussian(receipt.PaymentMethoc)}, {receipt.PaidAt:dd.MM HH:mm})";

@@ -52,7 +52,7 @@ public partial class StatisticsForm : Form
                     JOIN reservations r ON r.id_reserve = rt.id_reserve
                     WHERE rt.id_table = t.id_table
                       AND r.res_date = CURRENT_DATE
-                      AND gen.hour::time >= r.time_start AND gen.hour::time < r.time_end
+                      AND make_time(gen.hour, 0, 0) >= r.time_start AND make_time(gen.hour, 0, 0) < r.time_end
                 ) THEN 'занят' ELSE 'свободен' END AS status
             FROM tables t
             CROSS JOIN generate_series(9, 22) AS gen(hour)

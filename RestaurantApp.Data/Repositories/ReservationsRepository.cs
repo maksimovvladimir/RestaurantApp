@@ -37,6 +37,35 @@ public class ReservationsRepository
         return (int)cmd.ExecuteScalar()!;
     }
 
+    /// <summary>
+    /// Список пар "бронь+столик", по которым ещё можно создать заказ — с человекочитаемым
+    /// описанием (имя гостя, номер столика), чтобы не вводить id_reserve_table руками.
+    /// </summary>
+    public List<(int IdReserveTable, string Description)> GetReservationTablesForOrder()
+    {
+        var result = new List<(int, string)>();
+        using var conn = DbConfig.CreateConnection();
+        using var cmd = new NpgsqlCommand(
+            @"SELECT rt.id_reserve_table, r.client_name, t.number, r.res_date, r.time_start
+              FROM reservation_tables rt
+              JOIN reservations r ON r.id_reserve = rt.id_reserve
+              JOIN tables t ON t.id_table = rt.id_table
+              WHERE r.status = 'active'
+              ORDER BY r.res_date DESC, r.time_start DESC", conn);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var idReserveTable = reader.GetInt32(0);
+            var clientName = reader.GetString(1);
+            var tableNumber = reader.GetInt32(2);
+            var date = reader.GetDateTime(3);
+            var time = reader.GetTimeSpan(4);
+            result.Add((idReserveTable,
+                $"{clientName} — столик №{tableNumber} ({date:dd.MM} {time:hh\\:mm})"));
+        }
+        return result;
+    }
+
     public List<Reservation> GetActive()
     {
         var result = new List<Reservation>();

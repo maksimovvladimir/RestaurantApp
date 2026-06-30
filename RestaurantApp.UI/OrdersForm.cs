@@ -16,19 +16,26 @@ public partial class OrdersForm : Form
     {
         _currentUser = currentUser;
         InitializeComponent();
-        LoadDraftOrders();
+        LoadOrders();
         LoadMenu();
     }
 
-    /// <summary>Список заказов в статусе "draft" — это и есть "составление".</summary>
-    private void LoadDraftOrders()
+    /// <summary>
+    /// Список заказов в работе — не только "draft", но и переданные на кухню,
+    /// чтобы официант и кухня видели один и тот же список с привязкой к столику.
+    /// </summary>
+    private void LoadOrders()
     {
         cmbOrders.Items.Clear();
-        foreach (var order in _ordersRepo.GetOrdersByStatus("draft"))
+        foreach (var status in new[] { "draft", "placed", "cooking", "ready" })
         {
-            cmbOrders.Items.Add(new ComboBoxOrderItem(order));
+            foreach (var (order, tableNumber, clientName) in _ordersRepo.GetOrdersByStatusWithTable(status))
+            {
+                cmbOrders.Items.Add(new ComboBoxOrderItem(order, tableNumber, clientName));
+            }
         }
         if (cmbOrders.Items.Count > 0) cmbOrders.SelectedIndex = 0;
+        else RefreshOrderItems();
     }
 
     private void LoadMenu()
@@ -44,17 +51,57 @@ public partial class OrdersForm : Form
     private void RefreshOrderItems()
     {
         lstItems.Items.Clear();
-        if (_currentOrderId is null) return;
+        if (_currentOrderId is null)
+        {
+            lblTotal.Text = "Сумма: —";
+            lblStatus.Text = "Статус: —";
+            btnPay.Enabled = false;
+            return;
+        }
 
-        decimal total = 0;
         foreach (var (item, dishName) in _ordersRepo.GetOrderItems(_currentOrderId.Value))
         {
             lstItems.Items.Add($"{dishName}  ×{item.Quantity}");
         }
 
-        var order = _ordersRepo.GetOrdersByStatus("draft").FirstOrDefault(o => o.Id == _currentOrderId);
-        lblTotal.Text = order is null ? "Сумма: —" : $"Сумма: {order.TotalAmount:0.00} ₽";
+        var selected = cmbOrders.SelectedItem as ComboBoxOrderItem;
+        if (selected is not null)
+        {
+            lblTotal.Text = $"Сумма: {selected.Order.TotalAmount:0.00} ₽";
+            lblStatus.Text = $"Статус: {StatusToRussian(selected.Order.Status)}";
+        }
+
+        var hasReceipt = _ordersRepo.HasReceipt(_currentOrderId.Value);
+        btnPay.Enabled = selected?.Order.Status == "served" && !hasReceipt;
+
+        if (hasReceipt)
+        {
+            var receipt = _ordersRepo.GetReceipt(_currentOrderId.Value);
+            if (receipt is not null)
+            {
+                lblTotal.Text += $"   (оплачено: {receipt.Amount:0.00} ₽, {PaymentToRussian(receipt.PaymentMethoc)}, {receipt.PaidAt:dd.MM HH:mm})";
+            }
+        }
     }
+
+    private static string StatusToRussian(string status) => status switch
+    {
+        "draft" => "составление",
+        "placed" => "оформлен",
+        "cooking" => "готовится",
+        "ready" => "готов к выдаче",
+        "served" => "выдан",
+        "cancelled" => "отменён",
+        _ => status
+    };
+
+    private static string PaymentToRussian(string method) => method switch
+    {
+        "cash" => "наличные",
+        "card" => "карта",
+        "online" => "онлайн",
+        _ => method
+    };
 
     private void cmbOrders_SelectedIndexChanged(object sender, EventArgs e)
     {
@@ -68,13 +115,18 @@ public partial class OrdersForm : Form
     private void btnNewOrder_Click(object sender, EventArgs e)
     {
         using var promptForm = new NewOrderPromptForm();
+        if (!promptForm.HasOptions)
+        {
+            MessageBox.Show("Нет активных броней со столиками. Сначала создай бронь в разделе \"Брони / посещения\".",
+                "Нет данных", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         if (promptForm.ShowDialog() != DialogResult.OK) return;
 
         try
         {
             var newId = _ordersRepo.CreateDraftOrder(promptForm.IdReserveTable);
-            LoadDraftOrders();
-            // выбираем только что созданный заказ
+            LoadOrders();
             for (int i = 0; i < cmbOrders.Items.Count; i++)
             {
                 if (cmbOrders.Items[i] is ComboBoxOrderItem item && item.Order.Id == newId)
@@ -103,11 +155,9 @@ public partial class OrdersForm : Form
 
         try
         {
-            // Сообщение приходит прямо из БД (sp_add_dish_to_order) — и про успех,
-            // и про нехватку порций на складе, текст ровно как в задании.
             var message = _ordersRepo.AddDishToOrder(_currentOrderId.Value, dishItem.Dish.DishId, qty);
             MessageBox.Show(message, "Результат", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            RefreshOrderItems();
+            LoadOrders();
         }
         catch (PostgresException ex)
         {
@@ -118,12 +168,53 @@ public partial class OrdersForm : Form
     private void btnPlaceOrder_Click(object sender, EventArgs e)
     {
         if (_currentOrderId is null) return;
+        ChangeStatusSafe("placed", "Заказ оформлен и передан на кухню.");
+    }
+
+    private void btnStartCooking_Click(object sender, EventArgs e)
+    {
+        if (_currentOrderId is null) return;
+        ChangeStatusSafe("cooking", "Заказ взят в готовку.");
+    }
+
+    private void btnMarkReady_Click(object sender, EventArgs e)
+    {
+        if (_currentOrderId is null) return;
+        ChangeStatusSafe("ready", "Заказ готов к выдаче.");
+    }
+
+    private void btnMarkServed_Click(object sender, EventArgs e)
+    {
+        if (_currentOrderId is null) return;
+        ChangeStatusSafe("served", "Заказ выдан гостю. Теперь можно принять оплату.");
+    }
+
+    private void ChangeStatusSafe(string newStatus, string successMessage)
+    {
+        try
+        {
+            _ordersRepo.ChangeStatus(_currentOrderId!.Value, newStatus);
+            MessageBox.Show(successMessage, "Готово", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            LoadOrders();
+        }
+        catch (PostgresException ex)
+        {
+            MessageBox.Show(ex.MessageText, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void btnPay_Click(object sender, EventArgs e)
+    {
+        if (_currentOrderId is null) return;
+
+        using var promptForm = new PaymentPromptForm();
+        if (promptForm.ShowDialog() != DialogResult.OK) return;
 
         try
         {
-            _ordersRepo.ChangeStatus(_currentOrderId.Value, "placed");
-            MessageBox.Show("Заказ оформлен и передан на кухню.", "Готово", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            LoadDraftOrders();
+            _ordersRepo.CreateReceipt(_currentOrderId.Value, promptForm.PaymentMethod);
+            MessageBox.Show("Оплата принята, чек сформирован.", "Готово", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            RefreshOrderItems();
         }
         catch (PostgresException ex)
         {
@@ -134,8 +225,16 @@ public partial class OrdersForm : Form
     private class ComboBoxOrderItem
     {
         public Order Order { get; }
-        public ComboBoxOrderItem(Order order) => Order = order;
-        public override string ToString() => $"Заказ №{Order.Id} (бронь_столик #{Order.IdReserveTable})";
+        private readonly int _tableNumber;
+        private readonly string _clientName;
+        public ComboBoxOrderItem(Order order, int tableNumber, string clientName)
+        {
+            Order = order;
+            _tableNumber = tableNumber;
+            _clientName = clientName;
+        }
+        public override string ToString() =>
+            $"Заказ №{Order.Id} — столик №{_tableNumber} ({_clientName}) — {StatusToRussian(Order.Status)}";
     }
 
     private class ComboBoxDishItem

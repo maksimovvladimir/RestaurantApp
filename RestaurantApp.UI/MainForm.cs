@@ -33,4 +33,12 @@ public partial class MainForm : Form
     private void btnReservations_Click(object sender, EventArgs e) => new ReservationsForm().Show();
     private void btnMenuStock_Click(object sender, EventArgs e) => new MenuStockForm().Show();
     private void btnStatistics_Click(object sender, EventArgs e) => new StatisticsForm().Show();
+
+    private void btnLogout_Click(object sender, EventArgs e)
+    {
+        var login = new LoginForm();
+        this.Hide();
+        login.FormClosed += (_, _) => this.Close();
+        login.Show();
+    }
 }

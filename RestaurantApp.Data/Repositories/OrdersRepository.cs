@@ -52,6 +52,68 @@ public class OrdersRepository
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Заказы с человекочитаемой информацией о столике и госте — то, что нужно видеть
+    /// и официанту, и кухне, чтобы понимать, какой заказ к какому столику относится.
+    /// </summary>
+    public List<(Order Order, int TableNumber, string ClientName)> GetOrdersByStatusWithTable(string status)
+    {
+        var result = new List<(Order, int, string)>();
+        using var conn = DbConfig.CreateConnection();
+        using var cmd = new NpgsqlCommand(
+            @"SELECT o.id, o.id_reserve_table, o.status, o.created_at, o.confirmed_at, o.total_amount,
+                     t.number, r.client_name
+              FROM orders o
+              JOIN reservation_tables rt ON rt.id_reserve_table = o.id_reserve_table
+              JOIN tables t ON t.id_table = rt.id_table
+              JOIN reservations r ON r.id_reserve = rt.id_reserve
+              WHERE o.status = @status
+              ORDER BY o.created_at", conn);
+        cmd.Parameters.AddWithValue("status", status);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var order = new Order
+            {
+                Id = reader.GetInt32(0),
+                IdReserveTable = reader.GetInt32(1),
+                Status = reader.GetString(2),
+                CreatedAt = reader.GetDateTime(3),
+                ConfirmedAt = reader.IsDBNull(4) ? null : reader.GetDateTime(4),
+                TotalAmount = reader.GetDecimal(5)
+            };
+            result.Add((order, reader.GetInt32(6), reader.GetString(7)));
+        }
+        return result;
+    }
+
+    /// <summary>Есть ли уже чек по этому заказу (чтобы не пытаться оплатить дважды).</summary>
+    public bool HasReceipt(int orderId)
+    {
+        using var conn = DbConfig.CreateConnection();
+        using var cmd = new NpgsqlCommand("SELECT 1 FROM receipts WHERE order_id = @o", conn);
+        cmd.Parameters.AddWithValue("o", orderId);
+        return cmd.ExecuteScalar() != null;
+    }
+
+    public Receipt? GetReceipt(int orderId)
+    {
+        using var conn = DbConfig.CreateConnection();
+        using var cmd = new NpgsqlCommand(
+            "SELECT id, order_id, paid_at, amount, payment_methoc FROM receipts WHERE order_id = @o", conn);
+        cmd.Parameters.AddWithValue("o", orderId);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        return new Receipt
+        {
+            Id = reader.GetInt32(0),
+            OrderId = reader.GetInt32(1),
+            PaidAt = reader.GetDateTime(2),
+            Amount = reader.GetDecimal(3),
+            PaymentMethoc = reader.GetString(4)
+        };
+    }
+
     public List<Order> GetOrdersByStatus(string status)
     {
         var result = new List<Order>();

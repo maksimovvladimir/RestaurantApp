@@ -8,6 +8,7 @@ partial class MainForm
     private Button btnReservations = null!;
     private Button btnMenuStock = null!;
     private Button btnStatistics = null!;
+    private Button btnLogout = null!;
 
     protected override void Dispose(bool disposing)
     {
@@ -22,6 +23,7 @@ partial class MainForm
         btnReservations = new Button();
         btnMenuStock = new Button();
         btnStatistics = new Button();
+        btnLogout = new Button();
 
         lblWelcome.AutoSize = true;
         lblWelcome.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
@@ -47,7 +49,12 @@ partial class MainForm
         btnStatistics.Size = new Size(180, 45);
         btnStatistics.Click += btnStatistics_Click;
 
-        ClientSize = new Size(280, 330);
+        btnLogout.Text = "Выйти из аккаунта";
+        btnLogout.Location = new Point(30, 300);
+        btnLogout.Size = new Size(180, 35);
+        btnLogout.Click += btnLogout_Click;
+
+        ClientSize = new Size(280, 365);
         Text = "Ресторан — главное меню";
         StartPosition = FormStartPosition.CenterScreen;
 
@@ -56,5 +63,6 @@ partial class MainForm
         Controls.Add(btnReservations);
         Controls.Add(btnMenuStock);
         Controls.Add(btnStatistics);
+        Controls.Add(btnLogout);
     }
 }
